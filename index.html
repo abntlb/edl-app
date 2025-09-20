@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>État des lieux – Entrée / Sortie</title>
+  <meta name="description" content="Application mobile-first pour réaliser des états des lieux (entrée/sortie), signer et exporter en PDF (2 exemplaires)." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121935; --muted:#98a2b3; --txt:#e8efff; --acc:#5b8cff; --line:#1f2b5e; --chip:#0a2a5f;
+      --br:14px; --gap:14px; --shadow:0 10px 28px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;background:#0b1020;color:var(--txt)}
+    .wrap{max-width:960px;margin:0 auto;padding:16px}
+
+    .bar{position:sticky;top:0;z-index:10;background:#0d1430d9;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+    .steps{display:flex;gap:8px;overflow-x:auto;padding:8px 12px}
+    .step{flex:0 0 auto;background:#0d1636;border:1px solid var(--line);color:var(--muted);padding:6px 10px;border-radius:10px;font-size:11px;white-space:nowrap}
+    .step.active{border-color:var(--acc);color:#fff;box-shadow:0 0 0 2px rgba(91,140,255,.2) inset}
+
+    header{padding:14px 16px 0}
+    h1{margin:6px 0 2px;font-size:22px}
+    .sub{color:var(--muted);font-size:13px}
+
+    .card{background:#121935;border:1px solid var(--line);border-radius:var(--br);padding:16px;box-shadow:var(--shadow);margin:14px 0}
+    h2{margin:0 0 12px;font-size:18px}
+    label{display:block;font-size:13px;margin:8px 0 4px}
+    input[type="text"],input[type="email"],input[type="number"],select,textarea{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #27336a;background:#0b1535;color:#fff;outline:none}
+    textarea{min-height:100px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}
+    .chip{background:var(--chip);border:1px solid #1f3d82;color:#dfe8ff;padding:6px 10px;border-radius:999px;font-size:12px}
+    .chip .x{margin-left:6px;cursor:pointer;color:#bcd}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    button{border:0;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#5b8cff,#3a69ff);color:#fff}
+    button.ghost{background:#0d1636;border:1px solid #27336a;color:#c8d4ff}
+    .divider{height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent);margin:12px 0}
+
+    .room{border:1px dashed #2d3b79;border-radius:12px;padding:12px;margin-top:10px}
+    .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:10px}
+    .photo{position:relative;border-radius:10px;overflow:hidden;border:1px solid #2a3a7a}
+    .photo img{width:100%;height:100%;object-fit:cover;display:block}
+    .photo small{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:999px}
+
+    .sig-pad{width:100%;border:1px dashed #2d3b79;border-radius:12px;background:#07102b}
+    .toast{position:fixed;right:12px;bottom:12px;background:#0f1c44;border:1px solid #3050a0;padding:8px 12px;border-radius:10px;display:none;z-index:40}
+
+    /* Address dropdown */
+    .dlist{position:relative}
+    .dlist .opt{position:absolute;top:100%;left:0;right:0;background:#0b1535;border:1px solid #27336a;border-top:none;border-radius:0 0 12px 12px;max-height:220px;overflow:auto;z-index:15}
+    .dlist .opt div{padding:8px 10px;border-bottom:1px solid #1b2a63;cursor:pointer}
+    .dlist .opt div:hover{background:#122665}
+
+    /* Mobile-first: FAB + bottom sheet (pas de résumé fixe à l'écran) */
+    .fab{position:fixed;right:16px;bottom:16px;z-index:25;display:none}
+    .sheet{position:fixed;left:0;right:0;bottom:-100%;background:#0b1020;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.45);padding:16px;z-index:30;transition:bottom .25s ease}
+    .sheet.open{bottom:0}
+    .sheet .handle{width:44px;height:4px;background:#2a386f;border-radius:999px;margin:6px auto 12px}
+
+    @media(max-width:900px){ .fab{display:inline-flex} }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="steps" id="steps"></div>
+  </div>
+  <div class="wrap">
+    <header>
+      <h1>État des lieux</h1>
+      <div class="sub">Mobile-first, fonctionne hors ligne. Export PDF en 2 exemplaires.</div>
+    </header>
+    <div class="card" id="formArea"></div>
+    <div class="actions">
+      <button class="ghost" id="btnExportJSON">Exporter JSON</button>
+      <button class="ghost" id="btnImportJSON">Importer JSON</button>
+      <button class="primary" id="btnPDF">📄 Télécharger le PDF</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- FAB + bottom sheet (Résumé/Export) pour mobile -->
+  <button id="fabSummary" class="fab primary">Résumé / Export</button>
+  <div id="mobileSheet" class="sheet" aria-hidden="true">
+    <div class="handle"></div>
+    <div class="actions" style="justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Résumé</h3>
+      <button id="btnCloseSheet" class="ghost">Fermer</button>
+    </div>
+    <div id="summaryMobile" class="small" style="max-height:55vh;overflow:auto;margin-top:8px"></div>
+    <div class="divider"></div>
+    <div class="actions" style="position:sticky;bottom:0;background:transparent;padding-top:8px">
+      <button class="ghost" id="btnExportJSONMobile">Exporter JSON</button>
+      <button class="ghost" id="btnImportJSONMobile">Importer JSON</button>
+      <button class="primary" id="btnPDFMobile">📄 Télécharger le PDF</button>
+    </div>
+  </div>
+
+<script>
+// ====== CONFIG ======
+const ADDRESS_PROVIDER = 'gouv'; // 'gouv' (FR, sans clé) ou 'google'
+const GOOGLE_PLACES_API_KEY = '';
+
+// ====== STATE ======
+const emptyState = () => ({
+  edlType: 'entrée',
+  home: { kind: 'appartement', address: { voie:'', cp:'', ville:'', search:'' } },
+  roomCounts: { salon:0, cuisine:0, chambre:0, sdb:0, wc:0, autres:[] },
+  performer: { role:'proprietaire', firstname:'', lastname:'', email:'', address:{ voie:'', cp:'', ville:'', search:'' } },
+  tenant: { firstname:'', lastname:'', email:'', address:{ voie:'', cp:'', ville:'', search:'' }, useHomeAddress:true },
+  features: { type:'appartement', surface:'', pieces:'', meuble:false, chauffage:{type:'individuel', mode:'électrique'}, eau:{type:'individuel', mode:'électrique'}, smoke:false },
+  rooms: [],
+  meters: { water:{number:'', photo:null, comment:''}, electricity:{number:'', photo:null, comment:''} },
+  keys: { count:0, photo:null, comment:'' },
+  remarks: { photos:[], comment:'' },
+  signatures: { owner:null, tenant:null },
+  createdAt: new Date().toISOString()
+});
+let state = loadState() || emptyState();
+let current = 0;
+const steps = [
+  '1. Type','2. Bien','3. Adresse','4. Pièces','5. Réalisateur','6. Coordonnées','7. Locataire','8. Caractéristiques','9. État des pièces','10. Compteurs','11. Clés','12. Signatures','13. Remarques','14. Export'
+];
+let saveTimer;
+
+// ====== STORAGE ======
+function saveState(){ localStorage.setItem('edlForm', JSON.stringify(state)); toast('Brouillon enregistré'); }
+function loadState(){ try{ const s=JSON.parse(localStorage.getItem('edlForm')); return s&&typeof s==='object'?s:null }catch{ return null } }
+function deferSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 500); }
+
+// ====== HELPERS ======
+function el(tag, attrs={}, children=[]) {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)){
+    if(k==='class') e.className=v; else if(k==='html') e.innerHTML=v; else if(k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v); else e.setAttribute(k,v);
+  }
+  (Array.isArray(children)?children:[children]).forEach(c=>{ if(c!=null) e.appendChild(typeof c==='string'?document.createTextNode(c):c); });
+  return e;
+}
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',1500); }
+function cap(s){ return (s||'').slice(0,1).toUpperCase()+(s||'').slice(1); }
+
+// ====== ADDRESS AUTOCOMPLETE ======
+function makeAddressBlock(obj){
+  const wrap = el('div');
+  const dwrap = el('div',{class:'dlist'});
+  const search = el('input',{type:'text',placeholder:'Commencez à taper une adresse…', value: obj.address.search||'', onInput: onType});
+  const options = el('div',{class:'opt',style:'display:none'});
+  dwrap.append(search, options);
+
+  async function onType(){
+    obj.address.search = search.value; deferSave();
+    const q = search.value.trim(); if(q.length<3){ options.style.display='none'; options.innerHTML=''; return; }
+    let list=[];
+    if(ADDRESS_PROVIDER==='gouv'){
+      const r = await fetch('https://api-adresse.data.gouv.fr/search/?limit=5&q='+encodeURIComponent(q));
+      const js = await r.json();
+      list = (js.features||[]).map(f=>({label:f.properties.label, voie:(f.properties.housenumber?f.properties.housenumber+' ':'')+(f.properties.street||f.properties.name||''), cp:f.properties.postcode||'', ville:f.properties.city||''}));
+    } else if(ADDRESS_PROVIDER==='google' && GOOGLE_PLACES_API_KEY){
+      const r = await fetch('https://maps.googleapis.com/maps/api/place/textsearch/json?region=fr&query='+encodeURIComponent(q)+'&key='+GOOGLE_PLACES_API_KEY);
+      const js = await r.json();
+      list = (js.results||[]).slice(0,5).map(r=>({label:r.formatted_address, voie:r.name||'', cp:'', ville:''}));
+    }
+    options.innerHTML='';
+    list.forEach(item=>{
+      const row = el('div',{onClick:()=>{ search.value=item.label; obj.address.search=item.label; obj.address.voie=item.voie; obj.address.cp=item.cp; obj.address.ville=item.ville; update(); options.style.display='none'; deferSave(); }}, item.label);
+      options.appendChild(row);
+    });
+    options.style.display = list.length? 'block':'none';
+  }
+
+  const voie = el('input',{type:'text',placeholder:'Numéro et libellé de voie', value: obj.address.voie||'', onInput:e=>{obj.address.voie=e.target.value; deferSave();}});
+  const cpVille = el('div',{class:'row'},[
+    el('input',{type:'text',placeholder:'Code postal', value: obj.address.cp||'', onInput:e=>{obj.address.cp=e.target.value; deferSave();}}),
+    el('input',{type:'text',placeholder:'Ville', value: obj.address.ville||'', onInput:e=>{obj.address.ville=e.target.value; deferSave();}})
+  ]);
+
+  wrap.append(
+    el('label',{},'Recherche d’adresse (auto-complétion)'), dwrap,
+    el('label',{},'Numéro et libellé de voie'), voie,
+    el('label',{},'Code postal / Ville'), cpVille,
+  );
+  return wrap;
+}
+
+// ====== PHOTOS ======
+function fileToDataURL(file){ return new Promise((res,rej)=>{ const r = new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+async function compressImage(file, maxW=1600, quality=0.75){ const url=await fileToDataURL(file); const img=new Image(); img.src=url; await img.decode(); const scale=Math.min(1,maxW/img.width); const w=Math.round(img.width*scale),h=Math.round(img.height*scale); const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h); return c.toDataURL('image/jpeg',quality); }
+
+function photoInput(labelTxt, obj, key){
+  const wrap=el('div'); wrap.append(el('label',{},labelTxt));
+  const inp=el('input',{type:'file',accept:'image/*',onChange: async e=>{ const f=e.target.files[0]; if(!f) return; obj[key]=await compressImage(f); e.target.value=''; deferSave(); update(); }});
+  wrap.append(inp);
+  if(obj[key]){ const img=el('img',{src:obj[key],style:'width:100%;margin-top:8px;border-radius:10px;border:1px solid #2a3a7a'}); const rm=el('div',{class:'actions'},[ el('button',{class:'ghost',onClick:()=>{obj[key]=null; update(); deferSave();}},'Retirer') ]); wrap.append(img, rm); }
+  return wrap;
+}
+function photoMultiInput(labelTxt, obj, key, max){
+  const wrap=el('div'); wrap.append(el('label',{},labelTxt)); if(!obj[key]) obj[key]=[];
+  const inp=el('input',{type:'file',accept:'image/*',multiple:true,onChange: async e=>{ const files=[...e.target.files]; for(const f of files){ if(obj[key].length>=max) break; const url=await compressImage(f); obj[key].push({name:f.name,data:url}); } e.target.value=''; deferSave(); update(); }});
+  wrap.append(inp);
+  const gallery=el('div',{class:'photos'});
+  (obj[key]||[]).forEach((p,i)=>{ const tile=el('div',{class:'photo'},[ el('img',{src:p.data,alt:p.name||('photo '+(i+1))}), el('small',{},(p.name||('Photo '+(i+1)))) ]); tile.appendChild(el('div',{style:'position:absolute;top:6px;right:6px'}, el('button',{class:'ghost',onClick:()=>{obj[key].splice(i,1); update(); deferSave();}},'✕'))); gallery.appendChild(tile); });
+  wrap.append(gallery); return wrap;
+}
+
+// ====== ROOMS ======
+function counter(labelTxt, key){ const w=el('div'); w.append(el('label',{},labelTxt)); const i=el('input',{type:'number',min:'0',max:'5',value:state.roomCounts[key]||0,onInput:e=>{ const v=Math.max(0,Math.min(5,parseInt(e.target.value||'0',10))); state.roomCounts[key]=v; e.target.value=v; deferSave(); }}); w.append(i); return w; }
+function otherRoomsUI(){ const wrap=el('div'); wrap.append(el('label',{},'Autres pièces (optionnel)')); const list=el('div',{class:'chips'}); const add=el('div',{class:'row'},[ el('input',{type:'text',placeholder:'Ex : Bureau, Cellier…',id:'otherName'}), el('button',{onClick:()=>{ const v=document.getElementById('otherName').value.trim(); if(!v) return; state.roomCounts.autres.push(v); document.getElementById('otherName').value=''; update(); deferSave(); }},'+ Ajouter') ]); (state.roomCounts.autres||[]).forEach((name,idx)=>{ const c=el('span',{class:'chip'}, name); c.appendChild(el('span',{class:'x',onClick:()=>{ state.roomCounts.autres.splice(idx,1); update(); deferSave(); }},' ✕')); list.appendChild(c); }); wrap.append(add,list); return wrap; }
+function ensureRoomsFromCounts(){ const desired=[]; const pushN=(base,n)=>{ for(let i=1;i<=n;i++) desired.push(base+(n>1?' '+i:'')); }; pushN('Salon/séjour',state.roomCounts.salon||0); pushN('Cuisine',state.roomCounts.cuisine||0); pushN('Chambre',state.roomCounts.chambre||0); pushN('Salle de bain',state.roomCounts.sdb||0); pushN('WC séparé',state.roomCounts.wc||0); (state.roomCounts.autres||[]).forEach(a=>desired.push(a)); const existingByName = new Map(state.rooms.map(r=>[r.name,r])); state.rooms = desired.map(name=> existingByName.get(name) || { name, equipments:[], photos:[], comment:'' }); }
+function roomBlock(room){ const box=el('div',{class:'room'}); box.append(el('h3',{}, room.name)); const equipInput=el('input',{type:'text',placeholder:'Ajouter un équipement et appuyez sur Entrée'}); equipInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=equipInput.value.trim(); if(v){ room.equipments.push(v); equipInput.value=''; deferSave(); update(); } }}); const chips=el('div',{class:'chips'}); (room.equipments||[]).forEach((eq,i)=>{ const chip=el('span',{class:'chip'},eq); chip.appendChild(el('span',{class:'x',onClick:()=>{ room.equipments.splice(i,1); deferSave(); update(); }},' ✕')); chips.appendChild(chip); }); box.append(el('label',{},'Équipements fournis'), equipInput, chips); box.append(photoMultiInput('Photos (max 15)', room, 'photos', 15)); box.append(textareaInput('Commentaire', room, 'comment')); return box; }
+
+// ====== SIGNATURES ======
+function signaturePadUI(key){ const box=el('div'); const c=el('canvas',{class:'sig-pad'}); c.height=180; c.width=900; box.append(c); let pad; setTimeout(()=>{ pad=new SignaturePad(c,{backgroundColor:'#07102b',penColor:'#fff'}); if(state.signatures[key]){ const img=new Image(); img.src=state.signatures[key]; img.onload=()=>{ const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,c.width,c.height); }; } },0); const actions=el('div',{class:'actions'},[ el('button',{class:'ghost',onClick:()=>{ pad && pad.clear(); state.signatures[key]=null; deferSave(); }},'Effacer'), el('button',{class:'primary',onClick:()=>{ if(!pad) return; if(pad.isEmpty()){ toast('Signature vide'); return; } state.signatures[key]=c.toDataURL('image/png'); deferSave(); toast('Signature enregistrée'); }},'Enregistrer la signature') ]); box.append(actions); return box; }
+
+// ====== SMALL INPUT HELPERS ======
+function textInput(labelTxt, obj, key, type='text'){ const w=el('div'); w.append(el('label',{},labelTxt)); const i=el('input',{type, value:obj[key]||'', onInput:e=>{obj[key]=e.target.value; deferSave();}}); w.append(i); return w; }
+function textareaInput(labelTxt, obj, key){ const w=el('div'); w.append(el('label',{},labelTxt)); const i=el('textarea',{onInput:e=>{obj[key]=e.target.value; deferSave();}}, obj[key]||''); w.append(i); return w; }
+function selectInput(labelTxt, obj, key, options){ const w=el('div'); w.append(el('label',{},labelTxt)); const s=el('select',{onInput:e=>{obj[key]=e.target.value; deferSave();}}, options.map(o=>el('option',{value:o},o))); s.value=obj[key]||options[0]; w.append(s); return w; }
+function checkInput(labelTxt, obj, key){ const w=el('div',{class:'actions'}); const i=el('input',{type:'checkbox',checked:!!obj[key],onInput:e=>{obj[key]=e.target.checked; deferSave();}}); const lbl=el('label',{},labelTxt); lbl.style.margin='0 0 0 6px'; w.prepend(i); w.append(lbl); return w; }
+
+// ====== SUMMARY (mobile sheet) ======
+function renderSummary(){
+  const addr = a=> `${a.voie||''}${a.cp?(', '+a.cp):''}${a.ville?(' '+a.ville):''}` || '—';
+  const container = el('div');
+  const tbl = el('table',{style:'width:100%;border-collapse:collapse;font-size:12px'});
+  const row=(k,v)=>{ const tr=el('tr'); tr.append(el('th',{style:'text-align:left;padding:6px;border:1px solid #27336a;background:#0d1636'},k), el('td',{style:'padding:6px;border:1px solid #27336a'}, v)); return tr; };
+  tbl.append(
+    row('Type EDL', cap(state.edlType)),
+    row('Bien', cap(state.home.kind)),
+    row('Adresse logement', addr(state.home.address)),
+    row('Réalisateur', state.performer.role==='proprietaire'?'Propriétaire':'Représentant'),
+    row('Personne', `${state.performer.firstname||''} ${state.performer.lastname||''}`.trim()||'—'),
+    row('Email', state.performer.email||'—'),
+    row('Adresse personne', addr(state.performer.address)),
+    row('Locataire', `${state.tenant.firstname||''} ${state.tenant.lastname||''}`.trim()||'—'),
+    row('Email locataire', state.tenant.email||'—'),
+    row('Adresse locataire', addr(state.tenant.useHomeAddress?state.home.address:state.tenant.address)),
+    row('Surface (m²)', state.features.surface||'—'),
+    row('Pièces', state.features.pieces||'—'),
+    row('Meublé', state.features.meuble?'Oui':'Non'),
+    row('Chauffage', `${state.features.chauffage.type} / ${state.features.chauffage.mode}`),
+    row('Eau chaude', `${state.features.eau.type} / ${state.features.eau.mode}`),
+    row('Détecteur fumée', state.features.smoke?'Oui':'Non'),
+    row('Clés remises', String(state.keys.count||0)),
+  );
+  container.append(tbl); return container;
+}
+function renderSummaryMobile(){ const dst = document.getElementById('summaryMobile'); if(dst){ dst.innerHTML=''; dst.appendChild(renderSummary()); } }
+
+// ====== PDF EXPORT ======
+async function exportPDF(){
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({unit:'mm', format:'a4'});
+  const margin=12; let y=margin; const pageW=210, pageH=297, maxW=pageW-2*margin;
+  const addH = h=>{ if(y+h>pageH-margin){ doc.addPage(); y=margin; } };
+  const h1 = (t)=>{ addH(10); doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(20,40,120); doc.text(t, margin, y); y+=8; line(); };
+  const h2 = (t)=>{ addH(8); doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(20,20,20); doc.text(t, margin, y); y+=6; };
+  const p = (t)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(10,10,10); const lines = doc.splitTextToSize(t, maxW); addH(5+lines.length*5); doc.text(lines, margin, y); y+=lines.length*5; };
+  const line=()=>{ doc.setDrawColor(210,210,230); doc.line(margin, y, pageW-margin, y); y+=3; };
+  const img = async (data, maxWmm=maxW)=>{ const im=new Image(); im.src=data; await im.decode(); const ratio=im.width/im.height; let w=maxWmm; let h=w/ratio; if(h>pageH-2*margin){ h=pageH-2*margin; w=h*ratio; } addH(h+4); doc.addImage(data, 'JPEG', margin, y, w, h, undefined,'FAST'); y+=h+2; };
+
+  const copies = [ 'EXEMPLAIRE PROPRIÉTAIRE', 'EXEMPLAIRE LOCATAIRE' ];
+  for(let copyIdx=0; copyIdx<2; copyIdx++){
+    if(copyIdx>0){ doc.addPage(); y=margin; }
+    h1(`ÉTAT DES LIEUX – ${state.edlType.toUpperCase()} • ${copies[copyIdx]}`);
+    p(`Date: ${new Date().toLocaleDateString('fr-FR')}\nLogement: ${cap(state.home.kind)}\nAdresse: ${state.home.address.voie||''}, ${state.home.address.cp||''} ${state.home.address.ville||''}`);
+    line();
+
+    h2('Réalisateur');
+    p(`${state.performer.role==='proprietaire'?'Propriétaire':'Représentant'} – ${state.performer.firstname||''} ${state.performer.lastname||''}\nEmail: ${state.performer.email||'—'}\nAdresse: ${state.performer.address.voie||''}, ${state.performer.address.cp||''} ${state.performer.address.ville||''}`);
+
+    h2('Locataire');
+    const ta = state.tenant.useHomeAddress? state.home.address : state.tenant.address;
+    p(`${state.tenant.firstname||''} ${state.tenant.lastname||''}\nEmail: ${state.tenant.email||'—'}\nAdresse: ${ta.voie||''}, ${ta.cp||''} ${ta.ville||''}`);
+
+    h2('Caractéristiques');
+    p(`Type: ${state.features.type}, Surface: ${state.features.surface||'—'} m², Pièces: ${state.features.pieces||'—'}\nMeublé: ${state.features.meuble?'Oui':'Non'}\nChauffage: ${state.features.chauffage.type} / ${state.features.chauffage.mode}\nEau chaude: ${state.features.eau.type} / ${state.features.eau.mode}\nDétecteur de fumée: ${state.features.smoke?'Oui':'Non'}`);
+
+    h2('État des pièces');
+    ensureRoomsFromCounts(); if(!state.rooms.length) p('— Aucune pièce —');
+    for(const r of state.rooms){
+      h2('• '+r.name);
+      if((r.equipments||[]).length) p('Équipements: '+r.equipments.join(', ')); else p('Équipements: —');
+      if(r.comment) p('Commentaire: '+r.comment);
+      if((r.photos||[]).length){ for(const ph of r.photos){ await img(ph.data); } }
+      line();
+    }
+
+    h2('Compteurs');
+    p(`Eau – N°: ${state.meters.water.number||'—'}`); if(state.meters.water.photo) await img(state.meters.water.photo); if(state.meters.water.comment) p('Commentaire: '+state.meters.water.comment);
+    p(`Électricité – N°: ${state.meters.electricity.number||'—'}`); if(state.meters.electricity.photo) await img(state.meters.electricity.photo); if(state.meters.electricity.comment) p('Commentaire: '+state.meters.electricity.comment);
+
+    h2('Clés');
+    p(`Nombre remis: ${state.keys.count||0}`); if(state.keys.photo) await img(state.keys.photo); if(state.keys.comment) p('Commentaire: '+state.keys.comment);
+
+    h2('Remarques');
+    if(state.remarks.comment) p(state.remarks.comment);
+    if((state.remarks.photos||[]).length){ for(const ph of state.remarks.photos){ await img(ph.data); } }
+
+    h2('Signatures');
+    if(state.signatures.owner){ await img(state.signatures.owner, 80); p((state.performer.firstname||'')+' '+(state.performer.lastname||'')); }
+    if(state.signatures.tenant){ await img(state.signatures.tenant, 80); p((state.tenant.firstname||'')+' '+(state.tenant.lastname||'')); }
+
+    p('Fait le '+new Date().toLocaleDateString('fr-FR'));
+  }
+  const safeVille=(state.home.address.ville||'').replace(/[^a-z0-9\-\s]/gi,'').trim().replace(/\s+/g,'_');
+  const fname = `EDL_${state.edlType}_${safeVille||'Document'}.pdf`;
+  doc.save(fname);
+}
+
+// ====== NAV & STEPS RENDERING ======
+function renderSteps(){ const s=document.getElementById('steps'); s.innerHTML=''; steps.forEach((name,i)=> s.appendChild(el('div',{class:'step'+(i===current?' active':'')}, name)) ); }
+function next(){ if(current<steps.length-1){ current++; render(); } }
+function prev(){ if(current>0){ current--; render(); } }
+function nav(){ return el('div',{class:'actions'},[ el('button',{class:'ghost',onClick:prev},'← Précédent'), el('button',{class:'primary',onClick:next},'Suivant →') ]); }
+
+function render(){
+  renderSteps();
+  const area=document.getElementById('formArea'); area.innerHTML='';
+  if(current===0){
+    area.append(
+      el('h2',{},"1. Quel type d'état des lieux souhaitez-vous créer ?"),
+      (()=>{ const s=el('select',{onInput:e=>{state.edlType=e.target.value; deferSave();}}, [ el('option',{value:'entrée'},'Entrée'), el('option',{value:'sortie'},'Sortie') ]); s.value=state.edlType; return s; })(),
+      nav()
+    );
+  }
+  if(current===1){
+    area.append(
+      el('h2',{},'2. Lequel de ces biens décrit le mieux votre logement ?'),
+      (()=>{ const s=el('select',{onInput:e=>{state.home.kind=e.target.value; state.features.type=e.target.value; deferSave();}}, [ el('option',{value:'appartement'},'Appartement'), el('option',{value:'maison'},'Maison') ]); s.value=state.home.kind; return s; })(),
+      nav()
+    );
+  }
+  if(current===2){
+    area.append(
+      el('h2',{},'3. Où le bien est-il situé ?'),
+      makeAddressBlock(state.home),
+      nav()
+    );
+  }
+  if(current===3){
+    area.append(
+      el('h2',{},'4. Quelles pièces composent le bien ?'),
+      el('div',{class:'row3'},[ counter('Salon/séjour','salon'), counter('Cuisine','cuisine'), counter('Chambre','chambre') ]),
+      el('div',{class:'row3'},[ counter('Salle de bain','sdb'), counter('WC séparé','wc'), otherRoomsUI() ]),
+      el('div',{class:'sub'},"Vous détaillerez chaque pièce (équipements, photos, commentaires) à l'étape 9."),
+      nav()
+    );
+  }
+  if(current===4){
+    area.append(
+      el('h2',{},"5. Qui réalise l'état des lieux ?"),
+      el('div',{class:'row'},[
+        el('div',{class:'actions'},[ (()=>{ const i=el('input',{type:'radio',name:'role',checked:state.performer.role==='proprietaire',onInput:()=>{state.performer.role='proprietaire'; deferSave();}}); return i;})(), el('label',{},'Propriétaire') ]),
+        el('div',{class:'actions'},[ (()=>{ const i=el('input',{type:'radio',name:'role',checked:state.performer.role==='representant',onInput:()=>{state.performer.role='representant'; deferSave();}}); return i;})(), el('label',{},'Un représentant du propriétaire') ])
+      ]),
+      nav()
+    );
+  }
+  if(current===5){
+    area.append(
+      el('h2',{},"6. Coordonnées de la personne"),
+      el('div',{class:'row'},[ textInput('Prénom', state.performer, 'firstname'), textInput('Nom', state.performer, 'lastname') ]),
+      el('div',{class:'row'},[ textInput('Adresse mail', state.performer, 'email', 'email'), el('div') ]),
+      makeAddressBlock(state.performer),
+      nav()
+    );
+  }
+  if(current===6){
+    const sync = el('div',{class:'actions'},[ (()=>{ const i=el('input',{type:'checkbox',checked:state.tenant.useHomeAddress,onInput:e=>{state.tenant.useHomeAddress=e.target.checked; if(e.target.checked){ state.tenant.address={...state.home.address}; } deferSave(); update(); }}); return i;})(), el('label',{},"Utiliser l'adresse du logement par défaut") ]);
+    area.append(
+      el('h2',{},'7. Identité du locataire'),
+      el('div',{class:'row'},[ textInput('Prénom', state.tenant, 'firstname'), textInput('Nom', state.tenant, 'lastname') ]),
+      el('div',{class:'row'},[ textInput('Adresse mail', state.tenant, 'email', 'email'), el('div') ]),
+      sync,
+      state.tenant.useHomeAddress ? el('div',{class:'sub'},"L'adresse du locataire est copiée depuis le logement.") : makeAddressBlock(state.tenant),
+      nav()
+    );
+  }
+  if(current===7){
+    const f = state.features;
+    area.append(
+      el('h2',{},'8. Caractéristiques du logement'),
+      el('div',{class:'row'},[ selectInput('Type de bien', f, 'type', ['appartement','maison']), textInput('Surface habitable (m²)', f, 'surface', 'number') ]),
+      el('div',{class:'row'},[ textInput('Pièces (nombre total)', f, 'pieces', 'number'), checkInput('Location meublée ?', f,'meuble') ]),
+      el('div',{class:'divider'}),
+      el('h3',{},'Chauffage'),
+      el('div',{class:'row'},[ selectInput('Type', f.chauffage,'type',['individuel','collectif']), selectInput('Mode', f.chauffage,'mode',['électrique','gaz','fioul']) ]),
+      el('h3',{},'Eau chaude'),
+      el('div',{class:'row'},[ selectInput('Type', f.eau,'type',['individuel','collectif']), selectInput('Mode', f.eau,'mode',['électrique','gaz','fioul']) ]),
+      checkInput('Détecteur de fumée ?', f,'smoke'),
+      nav()
+    );
+  }
+  if(current===8){ ensureRoomsFromCounts(); area.append(el('h2',{},"9. État des pièces")); state.rooms.forEach(r=> area.append(roomBlock(r)) ); area.append(nav()); }
+  if(current===9){
+    area.append(el('h2',{},'10. Relevé de compteurs'));
+    area.append(el('h3',{},'Eau'));
+    area.append(el('div',{class:'row'},[ textInput('Numéro de compteur', state.meters.water,'number'), photoInput('Photo (optionnel)', state.meters.water, 'photo') ]));
+    area.append(textareaInput('Commentaire', state.meters.water, 'comment'));
+    area.append(el('div',{class:'divider'}));
+    area.append(el('h3',{},'Électricité'));
+    area.append(el('div',{class:'row'},[ textInput('Numéro de compteur', state.meters.electricity,'number'), photoInput('Photo (optionnel)', state.meters.electricity, 'photo') ]));
+    area.append(textareaInput('Commentaire', state.meters.electricity, 'comment'));
+    area.append(nav());
+  }
+  if(current===10){ area.append(el('h2',{},'11. Clés')); area.append(el('div',{class:'row'},[ (()=>{ const w=el('div'); w.append(el('label',{},'Nombre de clés remises (0 à 3)')); const i=el('input',{type:'number',min:'0',max:'3',value:state.keys.count,onInput:e=>{ const v=Math.max(0,Math.min(3,parseInt(e.target.value||'0',10))); state.keys.count=v; e.target.value=v; deferSave(); }}); w.append(i); return w; })(), photoInput('Photo (optionnel)', state.keys, 'photo') ])); area.append(textareaInput('Commentaire', state.keys, 'comment')); area.append(nav()); }
+  if(current===11){
+    area.append(el('h2',{},'12. Signatures'));
+    const ownerName = `${state.performer.firstname||''} ${state.performer.lastname||''}`.trim() || 'Propriétaire / Représentant';
+    const tenantName = `${state.tenant.firstname||''} ${state.tenant.lastname||''}`.trim() || 'Locataire';
+    area.append(el('label',{},'Signature du propriétaire / représentant : '+ownerName));
+    area.append(signaturePadUI('owner'));
+    area.append(el('label',{},'Signature du locataire : '+tenantName));
+    area.append(signaturePadUI('tenant'));
+    area.append(nav());
+  }
+  if(current===12){ area.append(el('h2',{},'13. Remarques')); area.append(photoMultiInput('Photos (max 10)', state.remarks, 'photos', 10)); area.append(textareaInput('Commentaire global', state.remarks, 'comment')); area.append(nav()); }
+  if(current===13){ area.append(el('h2',{},'14. Export')); area.append(el('p',{class:'sub'},"Utilisez le bouton \"Télécharger le PDF\" ci-dessous ou via le panneau Résumé / Export (bouton flottant).")); area.append(nav()); }
+
+  renderSummaryMobile();
+}
+
+// ====== GLOBAL EVENTS ======
+document.getElementById('btnPDF').addEventListener('click', exportPDF);
+document.getElementById('btnExportJSON').addEventListener('click', ()=>{ const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='edl_brouillon.json'; a.click(); URL.revokeObjectURL(a.href); });
+document.getElementById('btnImportJSON').addEventListener('click', ()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json'; inp.onchange = async e=>{ const f=e.target.files[0]; if(!f) return; const txt=await f.text(); try{ const js=JSON.parse(txt); state=js; saveState(); update(); toast('Brouillon importé'); }catch{ toast('Fichier invalide'); } }; inp.click(); });
+
+// Mobile sheet controls
+(function(){
+  const mobileSheet = document.getElementById('mobileSheet');
+  const fabSummary = document.getElementById('fabSummary');
+  const btnCloseSheet = document.getElementById('btnCloseSheet');
+  const btnPDFMobile = document.getElementById('btnPDFMobile');
+  const btnExportJSONMobile = document.getElementById('btnExportJSONMobile');
+  const btnImportJSONMobile = document.getElementById('btnImportJSONMobile');
+
+  if(fabSummary){ fabSummary.addEventListener('click', ()=>{ renderSummaryMobile(); mobileSheet.classList.add('open'); mobileSheet.setAttribute('aria-hidden','false'); }); }
+  if(btnCloseSheet){ btnCloseSheet.addEventListener('click', ()=>{ mobileSheet.classList.remove('open'); mobileSheet.setAttribute('aria-hidden','true'); }); }
+  if(btnPDFMobile){ btnPDFMobile.addEventListener('click', exportPDF); }
+  if(btnExportJSONMobile){ btnExportJSONMobile.addEventListener('click', ()=>{ const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='edl_brouillon.json'; a.click(); URL.revokeObjectURL(a.href); }); }
+  if(btnImportJSONMobile){ btnImportJSONMobile.addEventListener('click', ()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json'; inp.onchange = async e=>{ const f=e.target.files[0]; if(!f) return; const txt=await f.text(); try{ const js=JSON.parse(txt); state=js; saveState(); update(); toast('Brouillon importé'); }catch{ toast('Fichier invalide'); } }; inp.click(); }); }
+})();
+
+// ====== INIT ======
+function update(){ render(); }
+render();
+</script>
+</body>
+</html>
